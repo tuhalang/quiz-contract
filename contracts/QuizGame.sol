@@ -119,6 +119,7 @@ contract QuizGame {
         uint256 reward;
         uint timestamp;
         address winner;
+        bytes32 predictionWinner;
         uint256 duration;
         uint256 durationVoting;
     }
@@ -197,7 +198,7 @@ contract QuizGame {
         bytes32 id = keccak256(abi.encodePacked(block.timestamp, _content, _answer, msg.value, msg.sender));
         bytes32 content = keccak256(abi.encodePacked(_content));
         bytes32 answer = keccak256(abi.encodePacked(_answer, key));
-        quizzes[id] = Quiz(1, id, msg.sender, content, answer, true, msg.value, block.timestamp, address(0), 0, 0);
+        quizzes[id] = Quiz(1, id, msg.sender, content, answer, true, msg.value, block.timestamp, address(0), 0, 0, 0);
 
         if(rewardQuiz <= totalReward){
             require(token.transfer(msg.sender, rewardQuiz), "not enough token");
@@ -212,7 +213,7 @@ contract QuizGame {
         if(msg.value <= 0) revert("reward must greater than 0");
         bytes32 id = keccak256(abi.encodePacked(block.timestamp, _content, _duration, _durationVoting, msg.value, msg.sender));
         bytes32 content = keccak256(abi.encodePacked(_content));
-        quizzes[id] = Quiz(2, id, msg.sender, content, "", true, msg.value, block.timestamp, address(0), _duration, _durationVoting);
+        quizzes[id] = Quiz(2, id, msg.sender, content, "", true, msg.value, block.timestamp, address(0), 0, _duration, _durationVoting);
         
         if(rewardQuiz <= totalReward){
             require(token.transfer(msg.sender, rewardQuiz), "not enough token");
@@ -226,11 +227,13 @@ contract QuizGame {
     function voting(bytes32 _quizId, bytes32 _predictionId, uint _index) public isExistsQuiz(_quizId) {
         require(predictions[_quizId].length > _index, "index invalid");
 
-        Quiz storage quiz = quizzes[_quizId];
+        Quiz memory quiz = quizzes[_quizId];
 
         require(quiz.quizType == 2, "Not allow vote");
+        require(quiz.status, "not allow owner voting");
+
         require(isVoted[_predictionId][msg.sender] != true, "Only vote one times");
-        require(quiz.timestamp + quiz.duration <= block.timestamp, "Haven't finished");
+        require(quiz.timestamp + quiz.durationVoting > block.timestamp, "Haven finished");
 
         if(tax > 0){
             require(token.transferFrom(msg.sender, owner, tax));
@@ -239,6 +242,8 @@ contract QuizGame {
 
         Prediction storage prediction = predictions[_quizId][_index];
         require(prediction.id == _predictionId, "prediction not found");
+        require(prediction.owner != msg.sender, "not allow voting");
+
         prediction.vote += 1;
         isVoted[_predictionId][msg.sender] = true;
 
@@ -259,10 +264,7 @@ contract QuizGame {
         }
 
         require(quiz.status, "not allow predict");
-
-        if(quiz.owner == msg.sender){
-            revert("Not allow owner predict");
-        }
+        require(quiz.owner != msg.sender, "Not allow owner predict");
 
         if(tax > 0){
             require(token.transferFrom(msg.sender, owner, tax), "not enough token");
@@ -288,6 +290,7 @@ contract QuizGame {
         }
         
         address winner = address(0);
+        bytes32 predictionId;
         uint maxVote = 0;
         
         for(uint i=0; i<predictions[_quizId].length; i++){
@@ -295,12 +298,14 @@ contract QuizGame {
             if(quiz.quizType == 1){
                 if(prediction.answer == quiz.answer){
                     winner = prediction.owner;
+                    predictionId = prediction.id;
                     break;
                 }
             }else{
                 if(prediction.vote > maxVote){
                     maxVote = prediction.vote;
                     winner = prediction.owner;
+                    predictionId = prediction.id;
                 }
             }
             
@@ -310,10 +315,9 @@ contract QuizGame {
             (bool success, ) = payable(winner).call{value: quiz.reward}("");
             require(success, "Failed to send Tomo");
             quiz.status = false;
+            quiz.winner = winner;
+            quiz.predictionWinner = predictionId;
             emit RewardToWinder(_quizId, winner, quiz.reward, block.timestamp);
-        }
-        
+        }   
     }
-    
-    
 }
